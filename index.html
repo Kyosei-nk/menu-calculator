@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>注文計算</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box; margin: 0; padding: 0;
+      -webkit-tap-highlight-color: transparent; user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+      background: #f0ece4;
+      height: 100vh; height: 100dvh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ===== HEADER ===== */
+    #header {
+      background: #3a1f0f;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      z-index: 10;
+    }
+
+    #total-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px 6px;
+    }
+
+    #total-left { display: flex; align-items: baseline; gap: 8px; }
+    #total-label { font-size: 13px; color: rgba(255,255,255,0.6); }
+
+    #total-amount {
+      font-size: 30px; font-weight: 700; color: #f5c842;
+      letter-spacing: -0.02em; transition: color 0.12s;
+    }
+    #total-amount.flash { color: #fff06a; }
+
+    #total-count {
+      font-size: 12px; color: rgba(255,255,255,0.5);
+      align-self: flex-end; margin-bottom: 3px;
+    }
+
+    #log-btn {
+      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.22);
+      color: rgba(255,255,255,0.82); border-radius: 8px;
+      padding: 6px 11px; font-size: 13px; cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    /* ===== MAIN STORE BAR ===== */
+    #ms-bar {
+      display: none;
+      align-items: center; gap: 6px;
+      padding: 5px 14px 6px;
+      background: rgba(245,200,66,0.1);
+      border-top: 1px solid rgba(245,200,66,0.25);
+    }
+    #ms-bar.visible { display: flex; }
+
+    #ms-star { font-size: 13px; color: #f5c842; flex-shrink: 0; }
+    #ms-name-el { font-size: 13px; font-weight: 700; color: #f5c842; }
+
+    /* 金額を全体合計と同じスタイルで大きく表示 */
+    #ms-total-el {
+      font-size: 22px; font-weight: 700; color: #f5c842;
+      margin-left: auto; letter-spacing: -0.02em;
+    }
+
+    /* 点数は金額の後に小さく続く */
+    #ms-count-el {
+      font-size: 12px; color: rgba(255,255,255,0.6);
+      align-self: flex-end; margin-bottom: 2px; flex-shrink: 0;
+    }
+
+    /* ===== CATEGORY TABS ===== */
+    #tabs {
+      display: flex;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .tab {
+      flex: 1; padding: 9px 2px 8px; text-align: center;
+      font-size: 13px; font-weight: 500;
+      color: rgba(255,255,255,0.48);
+      cursor: pointer; border-bottom: 3px solid transparent;
+      transition: color 0.13s, border-color 0.13s;
+      touch-action: manipulation;
+    }
+    .tab.active { color: #f5c842; border-bottom-color: #f5c842; }
+    /* Main store indicator: ★ superscript on any tab with this class */
+    .tab.main-store { color: #f5c842; }
+    .tab.main-store::after {
+      content: '★'; font-size: 7px;
+      vertical-align: super; margin-left: 1px; opacity: 0.9;
+    }
+
+    /* ===== MENU AREA ===== */
+    #menu-area {
+      flex: 1; overflow-y: auto;
+      min-height: 0; /* flex子要素のデフォルトmin-height:autoを上書きしないとスクロール不可 */
+      padding: 8px 8px 120px; /* bottom: footer height */
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .category-panel { display: none; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .category-panel.active { display: grid; }
+
+    .menu-btn {
+      background: white; border: 2px solid transparent; border-radius: 10px;
+      padding: 10px 8px; cursor: pointer; text-align: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      position: relative; min-height: 64px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      touch-action: manipulation;
+      transition: transform 0.08s, background 0.08s, border-color 0.08s;
+    }
+    .menu-btn:active { transform: scale(0.94); background: #fff8e8; border-color: #f5c842; }
+    .menu-btn.has-order { border-color: #e8a020; background: #fffbf0; }
+    .menu-btn .item-name { font-size: 12.5px; font-weight: 500; color: #2d2d2d; line-height: 1.35; }
+    .menu-btn .item-price { font-size: 14px; font-weight: 700; color: #b83020; }
+
+    .count-badge {
+      position: absolute; top: -7px; right: -7px;
+      background: #d44020; color: white; border-radius: 50%;
+      width: 22px; height: 22px; font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      pointer-events: none;
+    }
+
+    /* ===== FOOTER (always visible) ===== */
+    #footer {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: white; border-top: 1px solid #ddd;
+      z-index: 10; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+      padding: 7px 8px max(8px, env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 6px;
+    }
+
+    .footer-row { display: grid; gap: 6px; }
+    #footer-row1 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+    #footer-row2 { grid-template-columns: 1fr 1fr; }
+
+    .footer-btn {
+      border: none; border-radius: 10px; font-weight: 700;
+      cursor: pointer; touch-action: manipulation;
+      transition: transform 0.08s, filter 0.08s, background 0.15s, color 0.15s;
+      padding: 10px 4px;
+      position: relative; /* バッジ配置のため */
+    }
+    .footer-btn:active { transform: scale(0.93); filter: brightness(0.86); }
+
+    /* 出前ボタン: 未選択=薄いグレー / 選択=濃いピンク */
+    .btn-delivery { background: #ebebeb; color: #888; font-size: 13px; border: 1.5px solid #ccc; }
+    .btn-delivery.active { background: #c0185a; color: white; border-color: transparent; }
+
+    .btn-p100  { background: #27a060; color: white; font-size: 13px; }
+    .btn-m300  { background: #d44020; color: white; font-size: 13px; }
+    .btn-undo  { background: #e8e4dc; color: #444;  font-size: 14px; }
+    .btn-reset { background: #e8e4dc; color: #444;  font-size: 14px; }
+
+    /* ===== LOG OVERLAY ===== */
+    #log-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 200; align-items: flex-end;
+    }
+    #log-overlay.open { display: flex; }
+
+    #log-sheet {
+      background: white; border-radius: 18px 18px 0 0; width: 100%;
+      max-height: 72vh; display: flex; flex-direction: column;
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+    #log-handle { width: 40px; height: 4px; background: #ddd; border-radius: 2px; margin: 12px auto 8px; }
+
+    #log-sheet-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 16px 10px; border-bottom: 1px solid #f0f0f0;
+    }
+    #log-sheet-header h2 { font-size: 16px; color: #333; }
+    #log-close {
+      background: #f0f0f0; border: none; border-radius: 50%;
+      width: 28px; height: 28px; font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; color: #666;
+    }
+
+    #log-list { overflow-y: auto; flex: 1; padding: 6px 16px; }
+
+    .log-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 7px 0; border-bottom: 1px solid #f5f5f5; font-size: 14px;
+    }
+    .log-row .log-name { color: #333; flex: 1; }
+    .log-row .log-price { font-weight: 700; color: #b83020; margin-left: 8px; white-space: nowrap; }
+    .log-row .log-price.credit   { color: #27a060; }
+    .log-row .log-price.delivery { color: #1a7a5e; }
+
+    #log-footer-bar {
+      padding: 12px 16px 0; border-top: 2px solid #2d2d2d;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .log-footer-label { font-size: 15px; font-weight: 600; color: #333; }
+    .log-footer-total { font-size: 20px; font-weight: 700; color: #b83020; }
+
+    .empty-msg { text-align: center; color: #aaa; padding: 32px 0; font-size: 14px; }
+
+    /* Double-tap hint (shown briefly on first main-store set) */
+    #hint-toast {
+      display: none; position: fixed; bottom: 140px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.78); color: white; border-radius: 20px;
+      padding: 8px 18px; font-size: 13px; z-index: 300; white-space: nowrap;
+      pointer-events: none;
+    }
+    #hint-toast.show { display: block; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="header">
+  <div id="total-bar">
+    <div id="total-left">
+      <span id="total-label">合計</span>
+      <span id="total-amount">¥0</span>
+      <span id="total-count">0点</span>
+    </div>
+    <button id="log-btn" onclick="openLog()">履歴 ▲</button>
+  </div>
+
+  <!-- Main store sub-total bar (hidden until a main store is set) -->
+  <div id="ms-bar">
+    <span id="ms-star">★</span>
+    <span id="ms-name-el"></span>
+    <span id="ms-total-el"></span>
+    <span id="ms-count-el"></span>
+  </div>
+
+  <div id="tabs">
+    <div class="tab active" data-cat="TONKATSU">とんかつ</div>
+    <div class="tab" data-cat="UNAGI">うなぎ</div>
+    <div class="tab" data-cat="KISHIMEN">きしめん</div>
+    <div class="tab" data-cat="KISSATEN">喫茶</div>
+  </div>
+</div>
+
+<!-- MENU PANELS -->
+<div id="menu-area">
+  <div class="category-panel active" id="cat-TONKATSU"></div>
+  <div class="category-panel"        id="cat-UNAGI"></div>
+  <div class="category-panel"        id="cat-KISHIMEN"></div>
+  <div class="category-panel"        id="cat-KISSATEN"></div>
+</div>
+
+<!-- FOOTER (always visible) -->
+<div id="footer">
+  <div class="footer-row" id="footer-row1">
+    <button id="btn-m300" class="footer-btn btn-m300" onclick="addAdj(-300)">−300円</button>
+    <button id="btn-p100" class="footer-btn btn-p100" onclick="addAdj(100)">＋100円</button>
+    <button id="btn-d300" class="footer-btn btn-delivery" onclick="toggleDelivery(300)">出前 300</button>
+    <button id="btn-d500" class="footer-btn btn-delivery" onclick="toggleDelivery(500)">出前 500</button>
+  </div>
+  <div class="footer-row" id="footer-row2">
+    <button class="footer-btn btn-undo"  onclick="undoLast()">↩ 戻す</button>
+    <button class="footer-btn btn-reset" onclick="resetAll()">✕ リセット</button>
+  </div>
+</div>
+
+<!-- LOG BOTTOM SHEET -->
+<div id="log-overlay" onclick="overlayClick(event)">
+  <div id="log-sheet">
+    <div id="log-handle"></div>
+    <div id="log-sheet-header">
+      <h2>注文履歴</h2>
+      <button id="log-close" onclick="closeLog()">✕</button>
+    </div>
+    <div id="log-list"></div>
+    <div id="log-footer-bar">
+      <span class="log-footer-label">合計</span>
+      <span class="log-footer-total" id="log-total-val">¥0</span>
+    </div>
+  </div>
+</div>
+
+<!-- Double-tap hint toast -->
+<div id="hint-toast"></div>
+
+<script>
+const CAT_NAMES = {
+  TONKATSU: 'とんかつ',
+  UNAGI:    'うなぎ',
+  KISHIMEN: 'きしめん',
+  KISSATEN: '喫茶'
+};
+
+const MENU = [
+  // ── とんかつ ──────────────────────────────────────────────
+  { id:'t1',  cat:'TONKATSU', name:'とんかつ定食',              price:1720 },
+  { id:'t2',  cat:'TONKATSU', name:'とんかつ（大）定食',        price:2100 },
+  { id:'t3',  cat:'TONKATSU', name:'ひれかつ定食',              price:1980 },
+  { id:'t4',  cat:'TONKATSU', name:'ひれかつ（大）定食',        price:2460 },
+  { id:'t5',  cat:'TONKATSU', name:'海老フライ定食',            price:2320 },
+  { id:'t6',  cat:'TONKATSU', name:'ミックスフライ定食',        price:2130 },
+  { id:'t7',  cat:'TONKATSU', name:'とんてき定食',              price:2350 },
+  { id:'t8',  cat:'TONKATSU', name:'とんてき（大）定食',        price:2890 },
+  { id:'t9',  cat:'TONKATSU', name:'金華豚 とんかつ定食',       price:3250 },
+  { id:'t10', cat:'TONKATSU', name:'金華豚 とんかつ（大）定食', price:4020 },
+  { id:'t11', cat:'TONKATSU', name:'金華豚 とんてき定食',       price:4020 },
+  { id:'t12', cat:'TONKATSU', name:'金華ひれ定食',              price:3550 },
+  { id:'t13', cat:'TONKATSU', name:'串かつ（1本）',             price:280  },
+  { id:'t14', cat:'TONKATSU', name:'野菜サラダ',                price:940  },
+  { id:'t15', cat:'TONKATSU', name:'ポテトサラダ',              price:770  },
+  { id:'t16', cat:'TONKATSU', name:'オムレツ',                  price:880  },
+  { id:'t17', cat:'TONKATSU', name:'比呂野のみそ',              price:780  },
+
+  // ── うなぎ ────────────────────────────────────────────────
+  { id:'u1',  cat:'UNAGI', name:'うな丼（小）',    price:2690 },
+  { id:'u2',  cat:'UNAGI', name:'まぶし丼',         price:2990 },
+  { id:'u3',  cat:'UNAGI', name:'うな丼',           price:3420 },
+  { id:'u4',  cat:'UNAGI', name:'上うな丼',         price:4150 },
+  { id:'u5',  cat:'UNAGI', name:'うな重',           price:4880 },
+  { id:'u6',  cat:'UNAGI', name:'ひつまぶし',       price:3720 },
+  { id:'u7',  cat:'UNAGI', name:'上ひつまぶし',     price:4450 },
+  { id:'u8',  cat:'UNAGI', name:'特上ひつまぶし',   price:5180 },
+  { id:'u9',  cat:'UNAGI', name:'長焼',             price:4380 },
+  { id:'u10', cat:'UNAGI', name:'白焼',             price:4380 },
+  { id:'u11', cat:'UNAGI', name:'三河地鶏の蒲焼丼', price:1500 },
+  { id:'u12', cat:'UNAGI', name:'うざく',           price:1500 },
+  { id:'u13', cat:'UNAGI', name:'肝焼',             price:1500 },
+  { id:'u14', cat:'UNAGI', name:'う巻',             price:3000 },
+
+  // ── きしめん ──────────────────────────────────────────────
+  { id:'k1',  cat:'KISHIMEN', name:'きしめん',               price:880  },
+  { id:'k2',  cat:'KISHIMEN', name:'とろろきしめん',          price:990  },
+  { id:'k3',  cat:'KISHIMEN', name:'青さのりきしめん',        price:990  },
+  { id:'k4',  cat:'KISHIMEN', name:'鶏つみれきしめん',        price:1210 },
+  { id:'k5',  cat:'KISHIMEN', name:'牛肉しぐれきしめん',      price:1320 },
+  { id:'k6',  cat:'KISHIMEN', name:'海老天きしめん',          price:1700 },
+  { id:'k7',  cat:'KISHIMEN', name:'鰻とろきしめん',          price:1800 },
+  { id:'k8',  cat:'KISHIMEN', name:'カレーきしめん',          price:1050 },
+  { id:'k9',  cat:'KISHIMEN', name:'カツカレーきしめん',      price:1600 },
+  { id:'k10', cat:'KISHIMEN', name:'海老天カレーきしめん',    price:1820 },
+  { id:'k11', cat:'KISHIMEN', name:'みぞれころきしめん',      price:990  },
+  { id:'k12', cat:'KISHIMEN', name:'みぞれかつころきしめん',  price:1490 },
+  { id:'k13', cat:'KISHIMEN', name:'天むす（5個）',           price:1000 },
+  { id:'k14', cat:'KISHIMEN', name:'かつむす（5個）',         price:1000 },
+  { id:'k15', cat:'KISHIMEN', name:'うなむす（5個）',         price:1250 },
+  { id:'k16', cat:'KISHIMEN', name:'かき揚げ',               price:410  },
+  { id:'k17', cat:'KISHIMEN', name:'海老天1本',               price:410  },
+
+  // ── 喫茶 ──────────────────────────────────────────────────
+  { id:'s1',  cat:'KISSATEN', name:'ロースかつサンド',       price:1160 },
+  { id:'s2',  cat:'KISSATEN', name:'ひれかつサンド',         price:1160 },
+  { id:'s3',  cat:'KISSATEN', name:'メンチカツサンド',       price:1160 },
+  { id:'s4',  cat:'KISSATEN', name:'チキンかつサンド',       price:1160 },
+  { id:'s5',  cat:'KISSATEN', name:'テリヤキチキンサンド',   price:1160 },
+  { id:'s6',  cat:'KISSATEN', name:'しょうが焼きサンド',     price:1160 },
+  { id:'s7',  cat:'KISSATEN', name:'ホットドッグ',           price:810  },
+  { id:'s8',  cat:'KISSATEN', name:'えびロール',             price:1160 },
+  { id:'s9',  cat:'KISSATEN', name:'ヤサイサンド',           price:760  },
+  { id:'s10', cat:'KISSATEN', name:'エッグサンド',           price:760  },
+  { id:'s11', cat:'KISSATEN', name:'ハムサンド',             price:760  },
+  { id:'s12', cat:'KISSATEN', name:'ツナサンド',             price:810  },
+  { id:'s13', cat:'KISSATEN', name:'ミックスサンド',         price:810  },
+  { id:'s14', cat:'KISSATEN', name:'BLTサンド',              price:1050 },
+  { id:'s15', cat:'KISSATEN', name:'ロースかつカレー',       price:1410 },
+  { id:'s16', cat:'KISSATEN', name:'ひれかつカレー',         price:1410 },
+  { id:'s17', cat:'KISSATEN', name:'チキンカツカレー',       price:1410 },
+  { id:'s18', cat:'KISSATEN', name:'オムカレー',             price:1250 },
+  { id:'s19', cat:'KISSATEN', name:'野菜カレー',             price:1250 },
+  { id:'s20', cat:'KISSATEN', name:'ドリップコーヒー',       price:350  },
+];
+
+// ── State ──────────────────────────────────────────────────────
+let orderLog      = [];   // { id, name, price, cat, isAdj, isDelivery, btnKey }
+let counts        = {};   // menu item id → count
+let adjCounts     = {};   // 'btn-p100' | 'btn-m300' → count
+let deliveryActive = 0;   // 0 | 300 | 500
+let mainStore     = null; // cat key or null
+let hintShown     = false;
+
+// ── Build menu buttons ─────────────────────────────────────────
+Object.keys(CAT_NAMES).forEach(cat => {
+  const panel = document.getElementById('cat-' + cat);
+  MENU.filter(m => m.cat === cat).forEach(item => {
+    const btn = document.createElement('button');
+    btn.className = 'menu-btn';
+    btn.id = 'mb-' + item.id;
+    btn.innerHTML =
+      `<span class="item-name">${item.name}</span>` +
+      `<span class="item-price">¥${item.price.toLocaleString()}</span>`;
+    btn.addEventListener('click', () => addItem(item), { passive: true });
+    panel.appendChild(btn);
+  });
+});
+
+// ── Tab double-tap (set main store) ───────────────────────────
+const tabLastTap = {};
+
+document.querySelectorAll('.tab').forEach(tabEl => {
+  tabEl.addEventListener('click', () => {
+    const cat = tabEl.dataset.cat;
+    const now  = Date.now();
+    const last = tabLastTap[cat] || 0;
+
+    switchTab(cat, tabEl); // single tap: always switch
+
+    if (last > 0 && now - last < 380) {
+      // double tap: toggle main store
+      toggleMainStore(cat);
+      tabLastTap[cat] = 0;
+    } else {
+      tabLastTap[cat] = now;
+    }
+  }, { passive: true });
+});
+
+function switchTab(cat, tabEl) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  tabEl.classList.add('active');
+  document.querySelectorAll('.category-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('cat-' + cat).classList.add('active');
+  document.getElementById('menu-area').scrollTop = 0;
+}
+
+function toggleMainStore(cat) {
+  mainStore = (mainStore === cat) ? null : cat;
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('main-store', t.dataset.cat === mainStore)
+  );
+  refreshMsBar();
+
+  // Show a one-time hint toast
+  if (mainStore && !hintShown) {
+    hintShown = true;
+    showToast(CAT_NAMES[mainStore] + ' をメイン店舗に設定しました（もう一度ダブルタップで解除）');
+  } else if (!mainStore) {
+    showToast('メイン店舗を解除しました');
+  }
+}
+
+// ── Order actions ──────────────────────────────────────────────
+function addItem(item) {
+  orderLog.push({ id: item.id, name: item.name, price: item.price,
+                  cat: item.cat, isAdj: false, isDelivery: false });
+  counts[item.id] = (counts[item.id] || 0) + 1;
+  refreshBtn(item.id);
+  refreshTotal();
+  refreshMsBar();
+}
+
+function addAdj(amount) {
+  const btnKey = amount > 0 ? 'btn-p100' : 'btn-m300';
+  const name   = amount > 0 ? `オプション +${amount}円` : `値引き ${amount}円`;
+  orderLog.push({ id: null, name, price: amount, cat: null, isAdj: true, isDelivery: false, btnKey });
+  adjCounts[btnKey] = (adjCounts[btnKey] || 0) + 1;
+  refreshAdjBadge(btnKey);
+  refreshTotal();
+  refreshMsBar();
+}
+
+function toggleDelivery(amount) {
+  // 既存の出前エントリをログから除去
+  const idx = orderLog.reduce((found, e, i) => e.isDelivery ? i : found, -1);
+  if (idx >= 0) orderLog.splice(idx, 1);
+
+  if (deliveryActive === amount) {
+    // 同じボタンで解除
+    deliveryActive = 0;
+  } else {
+    // 新しい出前料を選択
+    deliveryActive = amount;
+    orderLog.push({ id: null, name: `出前料（${amount}円）`, price: amount,
+                    cat: null, isAdj: true, isDelivery: true, btnKey: null });
+  }
+  refreshDeliveryBtns();
+  refreshTotal();
+  refreshMsBar();
+}
+
+function undoLast() {
+  if (!orderLog.length) return;
+  const last = orderLog.pop();
+  if (!last.isAdj) {
+    // 通常メニュー
+    if (counts[last.id] > 0) { counts[last.id]--; refreshBtn(last.id); }
+  } else if (last.isDelivery) {
+    // 出前料
+    deliveryActive = 0;
+    refreshDeliveryBtns();
+  } else if (last.btnKey) {
+    // -300 / +100 調整
+    adjCounts[last.btnKey] = Math.max(0, (adjCounts[last.btnKey] || 0) - 1);
+    refreshAdjBadge(last.btnKey);
+  }
+  refreshTotal();
+  refreshMsBar();
+}
+
+function resetAll() {
+  if (!orderLog.length) return;
+  if (!confirm('注文をすべてリセットしますか？')) return;
+  orderLog      = [];
+  counts        = {};
+  adjCounts     = {};
+  deliveryActive = 0;
+  MENU.forEach(m => refreshBtn(m.id));
+  refreshAdjBadge('btn-p100');
+  refreshAdjBadge('btn-m300');
+  refreshDeliveryBtns();
+  refreshTotal();
+  refreshMsBar();
+}
+
+// ── UI refresh ────────────────────────────────────────────────
+
+// 調整ボタン（+100/-300）のバッジ更新
+function refreshAdjBadge(btnId) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  const n = adjCounts[btnId] || 0;
+  let badge = btn.querySelector('.count-badge');
+  if (n > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'count-badge';
+      btn.appendChild(badge);
+    }
+    badge.textContent = n;
+  } else {
+    if (badge) badge.remove();
+  }
+}
+
+// 出前ボタンのトグル表示更新
+function refreshDeliveryBtns() {
+  document.getElementById('btn-d300').classList.toggle('active', deliveryActive === 300);
+  document.getElementById('btn-d500').classList.toggle('active', deliveryActive === 500);
+}
+
+function refreshBtn(id) {
+  const btn = document.getElementById('mb-' + id);
+  if (!btn) return;
+  const n = counts[id] || 0;
+  let badge = btn.querySelector('.count-badge');
+  if (n > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'count-badge';
+      btn.appendChild(badge);
+    }
+    badge.textContent = n;
+    btn.classList.add('has-order');
+  } else {
+    if (badge) badge.remove();
+    btn.classList.remove('has-order');
+  }
+}
+
+function refreshTotal() {
+  const total     = orderLog.reduce((s, e) => s + e.price, 0);
+  const itemCount = orderLog.filter(e => !e.isAdj).length;
+
+  const el = document.getElementById('total-amount');
+  el.textContent = '¥' + total.toLocaleString();
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 140);
+
+  document.getElementById('total-count').textContent = itemCount + '点';
+
+  if (document.getElementById('log-overlay').classList.contains('open')) renderLog();
+}
+
+function refreshMsBar() {
+  const bar = document.getElementById('ms-bar');
+  if (!mainStore) { bar.classList.remove('visible'); return; }
+
+  bar.classList.add('visible');
+
+  const msItems     = orderLog.filter(e => !e.isAdj && e.cat === mainStore);
+  const msItemTotal = msItems.reduce((s, e) => s + e.price, 0);
+  const delTotal    = orderLog.filter(e => e.isDelivery).reduce((s, e) => s + e.price, 0);
+  const msTotal     = msItemTotal + delTotal;
+
+  document.getElementById('ms-name-el').textContent  = CAT_NAMES[mainStore];
+  document.getElementById('ms-count-el').textContent = msItems.length + '点';
+
+  let totalText = '¥' + msTotal.toLocaleString();
+  if (delTotal > 0) totalText += '（出前料含）';
+  document.getElementById('ms-total-el').textContent = totalText;
+}
+
+// ── Log overlay ───────────────────────────────────────────────
+function openLog() {
+  renderLog();
+  document.getElementById('log-overlay').classList.add('open');
+}
+
+function closeLog() {
+  document.getElementById('log-overlay').classList.remove('open');
+}
+
+function overlayClick(e) {
+  if (e.target === document.getElementById('log-overlay')) closeLog();
+}
+
+function renderLog() {
+  const total  = orderLog.reduce((s, e) => s + e.price, 0);
+  const listEl = document.getElementById('log-list');
+
+  if (!orderLog.length) {
+    listEl.innerHTML = '<div class="empty-msg">注文がまだありません</div>';
+  } else {
+    listEl.innerHTML = orderLog.map((e, i) => {
+      const sign     = e.price >= 0 ? '+¥' : '-¥';
+      const priceStr = sign + Math.abs(e.price).toLocaleString();
+      const cls      = e.price < 0 ? 'credit' : e.isDelivery ? 'delivery' : '';
+      return `<div class="log-row">
+        <span class="log-name">${i + 1}. ${e.name}</span>
+        <span class="log-price ${cls}">${priceStr}</span>
+      </div>`;
+    }).join('');
+    listEl.scrollTop = listEl.scrollHeight;
+  }
+  document.getElementById('log-total-val').textContent = '¥' + total.toLocaleString();
+}
+
+// ── Toast helper ──────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('hint-toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+</script>
+</body>
+</html>
