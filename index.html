@@ -102,7 +102,7 @@
     #menu-area {
       flex: 1; overflow-y: auto;
       min-height: 0; /* flex子要素のデフォルトmin-height:autoを上書きしないとスクロール不可 */
-      padding: 8px 8px 120px; /* bottom: footer height */
+      padding: 8px 8px 136px; /* bottom: footer height */
       -webkit-overflow-scrolling: touch;
     }
 
@@ -162,6 +162,17 @@
     .btn-m300  { background: #d44020; color: white; font-size: 13px; }
     .btn-undo  { background: #e8e4dc; color: #444;  font-size: 14px; }
     .btn-reset { background: #e8e4dc; color: #444;  font-size: 14px; }
+
+    /* 調整対象店舗ラベル */
+    #adj-target {
+      text-align: center; font-size: 11px; color: #aaa;
+      line-height: 1; padding: 1px 0;
+    }
+    #adj-target-cat {
+      font-weight: 700; color: #3a1f0f;
+      background: #f0e8d8; border-radius: 4px;
+      padding: 1px 6px; margin-left: 3px;
+    }
 
     /* ===== LOG OVERLAY ===== */
     #log-overlay {
@@ -263,6 +274,7 @@
     <button id="btn-d300" class="footer-btn btn-delivery" onclick="toggleDelivery(300)">出前 300</button>
     <button id="btn-d500" class="footer-btn btn-delivery" onclick="toggleDelivery(500)">出前 500</button>
   </div>
+  <div id="adj-target">−300 / +100 の調整対象: <span id="adj-target-cat">とんかつ</span></div>
   <div class="footer-row" id="footer-row2">
     <button class="footer-btn btn-undo"  onclick="undoLast()">↩ 戻す</button>
     <button class="footer-btn btn-reset" onclick="resetAll()">✕ リセット</button>
@@ -424,6 +436,7 @@ function switchTab(cat, tabEl) {
   document.querySelectorAll('.category-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('cat-' + cat).classList.add('active');
   document.getElementById('menu-area').scrollTop = 0;
+  document.getElementById('adj-target-cat').textContent = CAT_NAMES[cat];
 }
 
 function toggleMainStore(cat) {
@@ -452,10 +465,17 @@ function addItem(item) {
   refreshMsBar();
 }
 
+function getActiveCat() {
+  const t = document.querySelector('.tab.active');
+  return t ? t.dataset.cat : null;
+}
+
 function addAdj(amount) {
   const btnKey = amount > 0 ? 'btn-p100' : 'btn-m300';
   const name   = amount > 0 ? `オプション +${amount}円` : `値引き ${amount}円`;
-  orderLog.push({ id: null, name, price: amount, cat: null, isAdj: true, isDelivery: false, btnKey });
+  const cat    = getActiveCat(); // タップ時にアクティブなカテゴリに紐付ける
+  const catLabel = cat ? `〔${CAT_NAMES[cat]}〕` : '';
+  orderLog.push({ id: null, name: name + catLabel, price: amount, cat, isAdj: true, isDelivery: false, btnKey });
   adjCounts[btnKey] = (adjCounts[btnKey] || 0) + 1;
   refreshAdjBadge(btnKey);
   refreshTotal();
@@ -582,8 +602,10 @@ function refreshMsBar() {
 
   const msItems     = orderLog.filter(e => !e.isAdj && e.cat === mainStore);
   const msItemTotal = msItems.reduce((s, e) => s + e.price, 0);
+  const msAdjTotal  = orderLog.filter(e => e.isAdj && !e.isDelivery && e.cat === mainStore)
+                               .reduce((s, e) => s + e.price, 0);
   const delTotal    = orderLog.filter(e => e.isDelivery).reduce((s, e) => s + e.price, 0);
-  const msTotal     = msItemTotal + delTotal;
+  const msTotal     = msItemTotal + msAdjTotal + delTotal;
 
   document.getElementById('ms-name-el').textContent  = CAT_NAMES[mainStore];
   document.getElementById('ms-count-el').textContent = msItems.length + '点';
